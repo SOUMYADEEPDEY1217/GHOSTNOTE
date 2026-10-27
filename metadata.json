@@ -1,0 +1,8 @@
+{
+  "name": "GHOSTNOTE",
+  "description": "A supernatural digital diary that transforms mysterious notes, fictional paranormal events, and personal memories into atmospheric stories. Some memories refuse to stay buried.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

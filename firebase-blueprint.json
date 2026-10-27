@@ -1,0 +1,249 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public user profile and application preferences for an authenticated GHOSTNOTE archivist. Contains no PII.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the user.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Display name or alias of the archivist.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "photoURL": {
+          "type": "string",
+          "description": "Avatar URL if provided by auth provider, or empty string.",
+          "minLength": 0,
+          "maxLength": 500
+        },
+        "authProvider": {
+          "type": "string",
+          "description": "Authentication provider identifier.",
+          "enum": ["google.com", "password"],
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "providerMode": {
+          "type": "string",
+          "description": "Selected AI inference mode.",
+          "enum": ["ollama", "sample", "gemini"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "ollamaEndpoint": {
+          "type": "string",
+          "description": "Preferred local Ollama endpoint.",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "ollamaModel": {
+          "type": "string",
+          "description": "Preferred local Ollama model name.",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "reducedMotion": {
+          "type": "boolean",
+          "description": "Whether reduced motion is enabled."
+        },
+        "scanlinesEnabled": {
+          "type": "boolean",
+          "description": "Whether CRT scanlines overlay is enabled."
+        },
+        "lowEffectsMode": {
+          "type": "boolean",
+          "description": "Whether low-effects GPU mode is enabled."
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the user profile was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the user profile was last updated."
+        }
+      },
+      "required": [
+        "uid",
+        "displayName",
+        "photoURL",
+        "authProvider",
+        "providerMode",
+        "ollamaEndpoint",
+        "ollamaModel",
+        "reducedMotion",
+        "scanlinesEnabled",
+        "lowEffectsMode",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "UserPrivateInfo": {
+      "title": "UserPrivateInfo",
+      "description": "Isolated PII record storing the user's email address in a private subcollection.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Verified email address of the user.",
+          "minLength": 3,
+          "maxLength": 254
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the private record was created."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the private record was last updated."
+        }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "StoryEntryDoc": {
+      "title": "StoryEntryDoc",
+      "description": "A supernatural diary story entry stored inside a user's personal archive subcollection.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique entry identifier matching the document ID.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the entry owner.",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "title": {
+          "type": "string",
+          "description": "Literary title of the supernatural story.",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "originalNote": {
+          "type": "string",
+          "description": "Raw memory fragment or note submitted by the user.",
+          "minLength": 1,
+          "maxLength": 6000
+        },
+        "story": {
+          "type": "string",
+          "description": "Generated supernatural narrative prose.",
+          "minLength": 1,
+          "maxLength": 25000
+        },
+        "style": {
+          "type": "string",
+          "description": "Literary horror style used for generation.",
+          "enum": [
+            "Psychological Horror",
+            "Haunted Terminal",
+            "Urban Legend",
+            "Bittersweet Remembrance"
+          ],
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "length": {
+          "type": "string",
+          "description": "Narrative length setting.",
+          "enum": ["Short", "Medium", "Long"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "wordCount": {
+          "type": "integer",
+          "description": "Total word count of the story."
+        },
+        "providerMode": {
+          "type": "string",
+          "description": "AI provider mode used to generate the entry.",
+          "enum": ["ollama", "sample", "gemini"],
+          "minLength": 1,
+          "maxLength": 20
+        },
+        "providerLabel": {
+          "type": "string",
+          "description": "Human-readable provenance badge for the AI provider.",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "isSample": {
+          "type": "boolean",
+          "description": "True if generated via offline sample mode."
+        },
+        "clientCreatedAt": {
+          "type": "string",
+          "description": "ISO timestamp string for UI display and export compatibility.",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the entry was created in Firestore."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when the entry was last updated in Firestore."
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "title",
+        "originalNote",
+        "story",
+        "style",
+        "length",
+        "wordCount",
+        "providerMode",
+        "providerLabel",
+        "isSample",
+        "clientCreatedAt",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Stores each user's public profile and UI/AI preferences."
+    },
+    "/users/{userId}/private/{docId}": {
+      "schema": { "$ref": "#/entities/UserPrivateInfo" },
+      "description": "Stores each user's isolated PII (email) accessible only to the owner."
+    },
+    "/users/{userId}/entries/{entryId}": {
+      "schema": { "$ref": "#/entities/StoryEntryDoc" },
+      "description": "Stores each user's personal supernatural diary entries."
+    }
+  }
+}

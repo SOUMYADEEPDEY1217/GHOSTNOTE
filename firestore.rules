@@ -1,0 +1,304 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Pillar 4.1: Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Phase 3: Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function hasValidParentUser(userId) {
+      return isOwner(userId) && (
+        !existsAfter(/databases/$(database)/documents/users/$(userId))
+        || getAfter(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+      );
+    }
+
+    // Validation Blueprint: UserProfile (/users/{userId})
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll([
+          'uid',
+          'displayName',
+          'photoURL',
+          'authProvider',
+          'providerMode',
+          'ollamaEndpoint',
+          'ollamaModel',
+          'reducedMotion',
+          'scanlinesEnabled',
+          'lowEffectsMode',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'photoURL',
+          'authProvider',
+          'providerMode',
+          'ollamaEndpoint',
+          'ollamaModel',
+          'reducedMotion',
+          'scanlinesEnabled',
+          'lowEffectsMode',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.uid == request.auth.uid && data.uid == userId
+        && data.displayName is string && data.displayName.size() >= 1 && data.displayName.size() <= 100
+        && data.photoURL is string && data.photoURL.size() >= 0 && data.photoURL.size() <= 500
+        && data.authProvider is string && data.authProvider.size() >= 1 && data.authProvider.size() <= 40
+        && data.authProvider in ['google.com', 'password']
+        && data.providerMode is string && data.providerMode.size() >= 1 && data.providerMode.size() <= 20
+        && data.providerMode in ['ollama', 'sample', 'gemini']
+        && data.ollamaEndpoint is string && data.ollamaEndpoint.size() >= 1 && data.ollamaEndpoint.size() <= 200
+        && data.ollamaModel is string && data.ollamaModel.size() >= 1 && data.ollamaModel.size() <= 100
+        && data.reducedMotion is bool
+        && data.scanlinesEnabled is bool
+        && data.lowEffectsMode is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: UserPrivateInfo (/users/{userId}/private/{docId})
+    function isValidUserPrivateInfo(data, userId) {
+      return data.keys().hasAll(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'email', 'createdAt', 'updatedAt'])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.uid == request.auth.uid && data.uid == userId
+        && data.email is string && data.email.size() >= 3 && data.email.size() <= 254
+        && data.email == request.auth.token.email
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: StoryEntryDoc (/users/{userId}/entries/{entryId})
+    function isValidStoryEntry(data, userId, entryId) {
+      return data.keys().hasAll([
+          'id',
+          'userId',
+          'title',
+          'originalNote',
+          'story',
+          'style',
+          'length',
+          'wordCount',
+          'providerMode',
+          'providerLabel',
+          'isSample',
+          'clientCreatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'id',
+          'userId',
+          'title',
+          'originalNote',
+          'story',
+          'style',
+          'length',
+          'wordCount',
+          'providerMode',
+          'providerLabel',
+          'isSample',
+          'clientCreatedAt',
+          'createdAt',
+          'updatedAt'
+        ])
+        && data.id is string && data.id.size() >= 1 && data.id.size() <= 128 && data.id.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.id == entryId
+        && data.userId is string && data.userId.size() >= 1 && data.userId.size() <= 128 && data.userId.matches('^[a-zA-Z0-9_\\-]+$')
+        && data.userId == request.auth.uid && data.userId == userId
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 160
+        && data.originalNote is string && data.originalNote.size() >= 1 && data.originalNote.size() <= 6000
+        && data.story is string && data.story.size() >= 1 && data.story.size() <= 25000
+        && data.style is string && data.style.size() >= 1 && data.style.size() <= 60
+        && data.style in ['Psychological Horror', 'Haunted Terminal', 'Urban Legend', 'Bittersweet Remembrance']
+        && data.length is string && data.length.size() >= 1 && data.length.size() <= 20
+        && data.length in ['Short', 'Medium', 'Long']
+        && data.wordCount is int && data.wordCount >= 1 && data.wordCount <= 10000
+        && data.providerMode is string && data.providerMode.size() >= 1 && data.providerMode.size() <= 20
+        && data.providerMode in ['ollama', 'sample', 'gemini']
+        && data.providerLabel is string && data.providerLabel.size() >= 1 && data.providerLabel.size() <= 120
+        && data.isSample is bool
+        && data.clientCreatedAt is string && data.clientCreatedAt.size() >= 1 && data.clientCreatedAt.size() <= 64
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // Collection 1: Public User Profile & Preferences (/users/{userId})
+    match /users/{userId} {
+      allow get: if isVerifiedUser() && isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if (
+        isVerifiedUser()
+        && isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action: UpdateProfileOrSettings
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'displayName',
+            'photoURL',
+            'authProvider',
+            'providerMode',
+            'ollamaEndpoint',
+            'ollamaModel',
+            'reducedMotion',
+            'scanlinesEnabled',
+            'lowEffectsMode',
+            'updatedAt'
+          ])
+        )
+      );
+
+      allow delete: if false;
+
+      // Collection 2: Isolated PII Subcollection (/users/{userId}/private/{docId})
+      match /private/{docId} {
+        allow get: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && docId == 'info'
+          && isOwner(userId)
+          && (
+            !exists(/databases/$(database)/documents/users/$(userId))
+            || get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          );
+
+        allow list: if false;
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && docId == 'info'
+          && isOwner(userId)
+          && isValidUserPrivateInfo(incoming(), userId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentUser(userId);
+
+        allow update: if (
+          isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(docId)
+          && docId == 'info'
+          && isOwner(userId)
+          && isValidUserPrivateInfo(incoming(), userId)
+          && incoming().uid == existing().uid
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: SyncVerifiedEmail
+            incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt'])
+          )
+          && hasValidParentUser(userId)
+        );
+
+        allow delete: if false;
+      }
+
+      // Collection 3: User's Supernatural Story Entries (/users/{userId}/entries/{entryId})
+      match /entries/{entryId} {
+        allow get: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(entryId)
+          && isOwner(userId)
+          && (resource == null || existing().userId == request.auth.uid)
+          && (
+            !exists(/databases/$(database)/documents/users/$(userId))
+            || get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          );
+
+        allow list: if isVerifiedUser()
+          && isOwner(userId)
+          && (resource == null || existing().userId == request.auth.uid);
+
+        allow create: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(entryId)
+          && isOwner(userId)
+          && isValidStoryEntry(incoming(), userId, entryId)
+          && incoming().createdAt == request.time
+          && incoming().updatedAt == request.time
+          && hasValidParentUser(userId);
+
+        allow update: if (
+          isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(entryId)
+          && isOwner(userId)
+          && isValidStoryEntry(incoming(), userId, entryId)
+          && incoming().id == existing().id
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time
+          && (
+            // Action: UpdateStoryEntry
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'title',
+              'originalNote',
+              'story',
+              'style',
+              'length',
+              'wordCount',
+              'providerMode',
+              'providerLabel',
+              'isSample',
+              'updatedAt'
+            ])
+          )
+          && hasValidParentUser(userId)
+        );
+
+        allow delete: if isVerifiedUser()
+          && isValidId(userId)
+          && isValidId(entryId)
+          && isOwner(userId)
+          && (resource == null || existing().userId == request.auth.uid)
+          && (
+            !exists(/databases/$(database)/documents/users/$(userId))
+            || get(/databases/$(database)/documents/users/$(userId)).data.uid == request.auth.uid
+          );
+      }
+    }
+  }
+}
