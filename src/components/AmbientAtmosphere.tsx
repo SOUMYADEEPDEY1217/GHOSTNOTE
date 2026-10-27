@@ -56,7 +56,7 @@ export const AmbientAtmosphere: React.FC<AmbientAtmosphereProps> = ({
       <div
         className="absolute inset-0 opacity-28 transition-transform duration-300 ease-out"
         style={{
-          backgroundImage: 'url("/assets/aistudio/9f82b5a8075304166d684ed7fa56da8d_70c5112c.jpg")',
+          backgroundImage: 'url("/assets/ghostnote-backdrop.jpg")',
           backgroundSize: 'cover',
           backgroundPosition: 'center center',
           transform:

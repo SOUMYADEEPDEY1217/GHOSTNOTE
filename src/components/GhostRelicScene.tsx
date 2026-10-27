@@ -889,7 +889,7 @@ export const GhostRelicScene: React.FC<GhostRelicSceneProps> = ({
         aria-hidden="true"
         className="absolute inset-0 bg-cover bg-center bg-no-repeat opacity-85 pointer-events-none"
         style={{
-          backgroundImage: 'url("/assets/aistudio/9f82b5a8075304166d684ed7fa56da8d_70c5112c.jpg")',
+          backgroundImage: 'url("/assets/ghostnote-backdrop.jpg")',
         }}
       />
 
