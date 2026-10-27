@@ -6,8 +6,29 @@ const app = express();
 
 app.use(express.json({ limit: '1mb' }));
 
+// Catch malformed JSON payloads and return JSON instead of HTML error pages
+app.use(
+  (
+    err: Error & { status?: number; type?: string },
+    _req: express.Request,
+    res: express.Response,
+    next: express.NextFunction
+  ) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      res.status(400).json({ error: 'Malformed JSON in request body.' });
+      return;
+    }
+    next(err);
+  }
+);
+
 const DEFAULT_OLLAMA_HOST = process.env.OLLAMA_HOST || 'http://127.0.0.1:11434';
 const DEFAULT_OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3.2';
+const GEMINI_FALLBACK_MODELS = [
+  'gemini-3.8-flash',
+  'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+];
 
 /**
  * Validates that an Ollama base URL points strictly to a safe loopback address
@@ -72,13 +93,17 @@ const STYLE_INSTRUCTIONS: Record<string, string> = {
 };
 
 const LENGTH_INSTRUCTIONS: Record<string, string> = {
-  Short: 'Write a concise, haunting micro-fiction piece between 150 and 230 words (2 to 3 tight paragraphs).',
-  Medium: 'Write a fully developed atmospheric short story between 350 and 500 words (4 to 6 paragraphs).',
-  Long: 'Write an immersive, multi-scene literary narrative between 650 and 900 words (7 to 10 rich paragraphs).',
+  Short:
+    'Write a concise, haunting micro-fiction piece between 150 and 230 words (2 to 3 tight paragraphs).',
+  Medium:
+    'Write a fully developed atmospheric short story between 350 and 500 words (4 to 6 paragraphs).',
+  Long:
+    'Write an immersive, multi-scene literary narrative between 650 and 900 words (7 to 10 rich paragraphs).',
 };
 
 function buildPrompts(note: string, style: string, length: string) {
-  const styleGuide = STYLE_INSTRUCTIONS[style] || STYLE_INSTRUCTIONS['Psychological Horror'];
+  const styleGuide =
+    STYLE_INSTRUCTIONS[style] || STYLE_INSTRUCTIONS['Psychological Horror'];
   const lengthGuide = LENGTH_INSTRUCTIONS[length] || LENGTH_INSTRUCTIONS['Medium'];
 
   const systemInstruction = `You are GHOSTNOTE, a literary supernatural chronicler. Your task is to transform a user's raw memory, mysterious note, or paranormal observation into an atmospheric, publication-grade piece of fiction.
@@ -93,8 +118,81 @@ Always return valid JSON with two fields:
   return { systemInstruction, userPrompt };
 }
 
+function parseJsonTitleAndStory(
+  rawText: string,
+  defaultTitle = 'Echoes in the Static'
+): { title: string; story: string } {
+  const cleaned = rawText
+    .trim()
+    .replace(/^```(?:json)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned) as { title?: string; story?: string };
+    const title =
+      typeof parsed.title === 'string' && parsed.title.trim()
+        ? parsed.title.trim()
+        : defaultTitle;
+    const story =
+      typeof parsed.story === 'string' && parsed.story.trim()
+        ? parsed.story.trim()
+        : cleaned;
+    return { title, story };
+  } catch {
+    const lines = cleaned.split('\n').filter((l) => l.trim().length > 0);
+    if (lines.length > 1 && lines[0].length < 90) {
+      return {
+        title: lines[0].replace(/^#+\s*/, '').replace(/^["']|["']$/g, '').trim() || defaultTitle,
+        story: lines.slice(1).join('\n\n').trim(),
+      };
+    }
+    return { title: defaultTitle, story: cleaned };
+  }
+}
+
+function buildServerSampleStory(note: string, style: string, length: string) {
+  const excerpt = note.trim().slice(0, 240);
+  const titleMap: Record<string, string> = {
+    'Psychological Horror': 'The Geometry Behind the Wallpaper',
+    'Haunted Terminal': 'BUFFER_DUMP // 03:14:09',
+    'Urban Legend': 'The Last Stop Before Blackwater Bridge',
+    'Bittersweet Remembrance': 'Where the Porch Light Still Burns',
+  };
+  const title = titleMap[style] || 'The Unburied Folio';
+  const paragraphs = [
+    `The archival note was recovered from the margin of an unindexed ledger: "${excerpt}" At the time it was written, nobody in the house believed the walls could retain an echo longer than the voice that made it.`,
+    `Yet by the third week of October, the stillness in the corridor began to reorganize itself around that exact memory. Shadows gathered along the floorboards where footsteps had paused, and the air carried the faint metallic chill of rain on iron.`,
+  ];
+  if (length === 'Medium' || length === 'Long') {
+    paragraphs.push(
+      `Every attempt to rationalize the phenomenon only deepened its precision. Clocks in adjacent rooms drifted toward the same minute, and the glass panes reflected a room arranged as it had been years before.`
+    );
+  }
+  if (length === 'Long') {
+    paragraphs.push(
+      `Some memories refuse to stay buried; they wait patiently beneath the varnish of ordinary days until someone finally writes them down.`
+    );
+  }
+  return {
+    title,
+    story: paragraphs.join('\n\n'),
+  };
+}
+
+const apiRouter = express.Router();
+
+// 0. Health check endpoint for Cloud Run & Vercel monitoring
+apiRouter.get('/health', (_req, res) => {
+  res.json({
+    status: 'ok',
+    service: 'ghostnote-api',
+    timestamp: new Date().toISOString(),
+  });
+});
+
 // 1. Provider configuration & availability status
-app.get('/api/providers/status', (_req, res) => {
+apiRouter.get('/providers/status', (_req, res) => {
   const hasGeminiKey = Boolean(
     process.env.GEMINI_API_KEY &&
       process.env.GEMINI_API_KEY !== 'MY_GEMINI_API_KEY' &&
@@ -105,14 +203,15 @@ app.get('/api/providers/status', (_req, res) => {
     defaultOllamaEndpoint: DEFAULT_OLLAMA_HOST,
     defaultOllamaModel: DEFAULT_OLLAMA_MODEL,
     cloudGeminiConfigured: hasGeminiKey,
-    cloudModelName: 'gemini-3.8-flash',
+    cloudModelName: GEMINI_FALLBACK_MODELS[0],
   });
 });
 
 // 2. Strict Ollama Connection + Inference Verification
-app.post('/api/providers/verify-ollama', async (req, res) => {
+apiRouter.post('/providers/verify-ollama', async (req, res) => {
   const { endpoint, model } = req.body || {};
-  const targetModel = (typeof model === 'string' && model.trim()) || DEFAULT_OLLAMA_MODEL;
+  const targetModel =
+    (typeof model === 'string' && model.trim()) || DEFAULT_OLLAMA_MODEL;
 
   const validation = validateSafeOllamaEndpoint(endpoint);
   if (!validation.valid) {
@@ -154,7 +253,9 @@ app.post('/api/providers/verify-ollama', async (req, res) => {
       return;
     }
 
-    const tagsData = (await tagsResponse.json()) as { models?: Array<{ name: string }> };
+    const tagsData = (await tagsResponse.json()) as {
+      models?: Array<{ name: string }>;
+    };
     const availableModels = Array.isArray(tagsData.models)
       ? tagsData.models.map((m) => m.name)
       : [];
@@ -188,7 +289,9 @@ app.post('/api/providers/verify-ollama', async (req, res) => {
         model: targetModel,
         availableModels,
         error: `Ollama server is reachable, but inference failed for model "${targetModel}" (HTTP ${genResponse.status}). ${
-          errText ? errText.slice(0, 160) : `Run "ollama pull ${targetModel}" in your terminal.`
+          errText
+            ? errText.slice(0, 160)
+            : `Run "ollama pull ${targetModel}" in your terminal.`
         }`,
       });
       return;
@@ -203,7 +306,8 @@ app.post('/api/providers/verify-ollama', async (req, res) => {
         endpoint: baseUrl,
         model: targetModel,
         availableModels,
-        error: `Ollama returned an unexpected payload during inference verification.`,
+        error:
+          'Ollama returned an unexpected payload during inference verification.',
       });
       return;
     }
@@ -232,8 +336,8 @@ app.post('/api/providers/verify-ollama', async (req, res) => {
   }
 });
 
-// 3. Story Generation Route (Supports Local Ollama or Cloud Gemini)
-app.post('/api/generate', async (req, res) => {
+// 3. Story Generation Route (Supports Local Ollama, Cloud Gemini with fallback chain, and Sample Mode)
+apiRouter.post('/generate', async (req, res) => {
   const {
     note,
     style = 'Psychological Horror',
@@ -257,6 +361,20 @@ app.post('/api/generate', async (req, res) => {
     return;
   }
 
+  // Branch 0: Explicit Sample Mode
+  if (provider === 'sample') {
+    const sample = buildServerSampleStory(note, style, length);
+    res.json({
+      title: sample.title,
+      story: sample.story,
+      provider: 'sample',
+      providerLabel: 'Sample Story (Offline Demo)',
+      model: 'sample-synthesizer',
+      verifiedLocal: false,
+    });
+    return;
+  }
+
   const { systemInstruction, userPrompt } = buildPrompts(note, style, length);
 
   // Branch A: Open-Weight Local Inference via Ollama
@@ -268,7 +386,9 @@ app.post('/api/generate', async (req, res) => {
     }
 
     const baseUrl = validation.normalizedUrl;
-    const modelName = (typeof ollamaModel === 'string' && ollamaModel.trim()) || DEFAULT_OLLAMA_MODEL;
+    const modelName =
+      (typeof ollamaModel === 'string' && ollamaModel.trim()) ||
+      DEFAULT_OLLAMA_MODEL;
 
     try {
       const controller = new AbortController();
@@ -296,7 +416,9 @@ app.post('/api/generate', async (req, res) => {
         const errBody = await ollamaRes.text().catch(() => '');
         res.status(502).json({
           error: `Local Ollama inference failed (HTTP ${ollamaRes.status}). ${
-            errBody ? errBody.slice(0, 180) : `Verify that "${modelName}" is pulled.`
+            errBody
+              ? errBody.slice(0, 180)
+              : `Verify that "${modelName}" is pulled.`
           }`,
         });
         return;
@@ -305,32 +427,20 @@ app.post('/api/generate', async (req, res) => {
       const data = (await ollamaRes.json()) as { response?: string };
       const rawText = (data.response || '').trim();
       if (!rawText) {
-        res.status(502).json({ error: 'Local Ollama returned an empty response.' });
+        res
+          .status(502)
+          .json({ error: 'Local Ollama returned an empty response.' });
         return;
       }
 
-      let parsedTitle = 'Untitled Apparition';
-      let parsedStory = rawText;
-
-      try {
-        const parsed = JSON.parse(rawText) as { title?: string; story?: string };
-        if (parsed.title && typeof parsed.title === 'string') {
-          parsedTitle = parsed.title.trim();
-        }
-        if (parsed.story && typeof parsed.story === 'string') {
-          parsedStory = parsed.story.trim();
-        }
-      } catch {
-        const lines = rawText.split('\n').filter((l) => l.trim().length > 0);
-        if (lines.length > 1 && lines[0].length < 80) {
-          parsedTitle = lines[0].replace(/^#+\s*/, '').replace(/^["']|["']$/g, '');
-          parsedStory = lines.slice(1).join('\n\n');
-        }
-      }
+      const { title, story } = parseJsonTitleAndStory(
+        rawText,
+        'Untitled Apparition'
+      );
 
       res.json({
-        title: parsedTitle,
-        story: parsedStory,
+        title,
+        story,
         provider: 'ollama',
         providerLabel: `Local Ollama (${modelName})`,
         model: modelName,
@@ -346,76 +456,94 @@ app.post('/api/generate', async (req, res) => {
     }
   }
 
-  // Branch B: Optional Cloud Provider (Google Gemini API)
+  // Branch B: Cloud Provider (Google Gemini API with automatic multi-model resilience)
   if (provider === 'gemini') {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
       res.status(503).json({
-        error: 'Cloud Gemini API key is not configured on the server. Use Sample Mode or configure a local Ollama instance.',
+        error:
+          'Cloud Gemini API key is not configured on the server. Use Sample Mode or configure a local Ollama instance.',
       });
       return;
     }
 
-    try {
-      const ai = new GoogleGenAI({
-        apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          },
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
         },
-      });
+      },
+    });
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.8-flash',
-        contents: userPrompt,
-        config: {
-          systemInstruction,
-          temperature: 0.85,
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              title: {
-                type: Type.STRING,
-                description: 'Evocative literary title for the supernatural diary entry.',
+    let lastErrorMessage = 'Gemini request failed';
+
+    for (const candidateModel of GEMINI_FALLBACK_MODELS) {
+      try {
+        const response = await ai.models.generateContent({
+          model: candidateModel,
+          contents: userPrompt,
+          config: {
+            systemInstruction,
+            temperature: 0.85,
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: {
+                  type: Type.STRING,
+                  description:
+                    'Evocative literary title for the supernatural diary entry.',
+                },
+                story: {
+                  type: Type.STRING,
+                  description:
+                    'The complete atmospheric story with paragraphs separated by double newlines.',
+                },
               },
-              story: {
-                type: Type.STRING,
-                description: 'The complete atmospheric story with paragraphs separated by double newlines.',
-              },
+              required: ['title', 'story'],
             },
-            required: ['title', 'story'],
           },
-        },
-      });
+        });
 
-      const rawOutput = response.text?.trim() || '';
-      if (!rawOutput) {
-        res.status(502).json({ error: 'Cloud Gemini returned an empty response.' });
+        const rawOutput = response.text?.trim() || '';
+        if (!rawOutput) {
+          lastErrorMessage = `Model ${candidateModel} returned an empty response.`;
+          continue;
+        }
+
+        const { title, story } = parseJsonTitleAndStory(
+          rawOutput,
+          'Echoes in the Static'
+        );
+
+        res.json({
+          title,
+          story,
+          provider: 'gemini',
+          providerLabel: `Cloud Inference (Google Gemini · ${candidateModel})`,
+          model: candidateModel,
+          verifiedLocal: false,
+        });
         return;
+      } catch (err: unknown) {
+        lastErrorMessage =
+          err instanceof Error ? err.message : 'Gemini request failed';
+        // Continue to next fallback model in GEMINI_FALLBACK_MODELS
       }
-
-      const parsed = JSON.parse(rawOutput) as { title?: string; story?: string };
-      res.json({
-        title: (parsed.title || 'Echoes in the Static').trim(),
-        story: (parsed.story || rawOutput).trim(),
-        provider: 'gemini',
-        providerLabel: 'Cloud Inference (Google Gemini)',
-        model: 'gemini-3.8-flash',
-        verifiedLocal: false,
-      });
-      return;
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Gemini request failed';
-      res.status(502).json({
-        error: `Cloud Gemini generation failed: ${msg}`,
-      });
-      return;
     }
+
+    res.status(502).json({
+      error: `Cloud Gemini generation failed across fallback models: ${lastErrorMessage}`,
+    });
+    return;
   }
 
   res.status(400).json({ error: `Unsupported provider: ${String(provider)}` });
 });
+
+// Mount API router at both /api and / so Vercel rewrites and Express server.ts both match seamlessly
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
 
 export default app;
